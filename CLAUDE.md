@@ -13,28 +13,38 @@ TypeScript 製の field-level access control ライブラリ。zero runtime deps
 ## 設計原則
 
 - **core (`src/index.ts` 経由の export) は ORM / 外部ライブラリへ依存しない**
-- ORM 固有の機能は **sub-export** に分離 (例: `src/drizzle.ts` → `field-guard/drizzle`)
+- ORM 固有の機能を入れたい場合は **sub-export** に分離する (例: `src/<orm>.ts` → `field-guard/<orm>`)
 - 該当 ORM は **`peerDependencies` + `peerDependenciesMeta.optional: true`** で peer optional
 - API は最小に保つ。「ちょっと便利」のために core を肥大化させない
 
-## 試験 API の命名規約
+## スコープ: field-level に限定する
 
-安定化前の API は **`unstable_` プレフィックス** を全識別子に付ける (React の慣習)。
+このライブラリは **「行内のどの列が読めるか」 (field-level visibility)** だけを扱う。
+**「どの行が読めるか」 (row-level access)** は意図的に扱わない。
 
-- params キー: `unstable_adapter`
-- chain メソッド: `unstable_withRowPolicy`
-- 関数 / factory: `unstable_drizzleAdapter`
-- 結果のプロパティ: `unstable_where`
+### 行レベルを扱わない理由 (検討済み、再提案しない)
 
-安定化時は **1 PR で全プレフィックスを一斉に外す**。旧名は 1 minor だけ deprecated alias で残す。
+過去に `unstable_withRowPolicy` + `field-guard/drizzle` adapter で「policy →
+Drizzle の WHERE 自動生成」を試作したが revert した。理由:
 
-`unstable_` が付いた識別子は patch / minor で破壊的変更を入れて良い (semver 上の例外的扱い、CHANGELOG に明記)。
+- **JOIN / `db.query` (relational API) / サブクエリ / CTE / raw SQL** のどこかで必ず穴が空き、外部ライブラリから漏れなく行を絞ることは不可能
+- 「効いてる気がするけど効いていない」は**無い方がマシ**な footgun
+- 本物の行レベル防御は **Postgres RLS** か **Drizzle 本体への政策レイヤー追加**の領分
+
+将来「行レベルを入れたい」と思ったら、まずこのセクションを読み直すこと。
+過去の経緯: revert commit と feat commit を `git log --grep="行レベル"` で確認できる。
+
+### 行レベルが本当に必要な利用者へ案内するもの
+
+- **Postgres RLS** + Drizzle の `pgPolicy` primitive (schema 定義に書く)
+- session 変数 (`SET LOCAL app.user_id = ...`) で current actor を渡す
+- field-guard はその上に**列の可視性レイヤー**として乗る (defense-in-depth)
 
 ## セキュリティ方針
 
 - **deny-by-default**。permissive な暗黙挙動を導入しない
-- 「省略 = 全許可」は地雷。policy / row-rule の宣言は **`Record<L, P>` で必須化**して書き忘れをコンパイルエラーにする
-- ORM の WHERE 自動注入のような「magic」は core に入れない (型 / join / subquery / raw のどこかで穴が空く)。代わりに adapter 抽象で利用側に責任を残す
+- 「省略 = 全許可」は地雷。宣言は `Record<L, ...>` で必須化してコンパイルエラーで防ぐ
+- ORM の WHERE 自動注入のような「magic」は core に入れない (上記スコープ参照)
 
 ## テスト規約
 
